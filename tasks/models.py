@@ -1,154 +1,134 @@
+"""
+tasks/models.py
+
+Task model + post_save / post_delete signals that:
+  1. Write to ActivityLog (audit trail)
+  2. Invalidate Redis cache for dashboard/reports
+  3. Enqueue Celery notification tasks on assignment or status change
+"""
+
+import uuid
+import logging
+
+from django.conf import settings
 from django.db import models
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
 
-# Create your models here.
-
-
-# class AuthUser(models.Model):
-#     id = models.BigAutoField(primary_key=True)
-#     password = models.CharField(max_length=128)
-#     last_login = models.DateTimeField(null=True)
-#     is_superuser = models.BooleanField()
-#     username = models.CharField(max_length=150)
-#     first_name = models.CharField(max_length=150)
-#     last_name = models.CharField(max_length=150)
-#     email = models.CharField(max_length=254)
-#     is_staff = models.BooleanField()
-#     is_active = models.BooleanField()
-#     date_joined = models.DateTimeField()
-#
-#     class Meta:
-#         managed = False
-#         db_table = 'auth_user'
-#
-#
-# class AuthGroup(models.Model):
-#     id = models.BigAutoField(primary_key=True)
-#     name = models.CharField(max_length=150)
-#
-#     class Meta:
-#         managed = False
-#         db_table = 'auth_group'
-#
-#
-# class AuthPermission(models.Model):
-#     id = models.BigAutoField(primary_key=True)
-#     name = models.CharField(max_length=255)
-#     content_type_id = models.BigIntegerField()
-#     codename = models.CharField(max_length=100)
-#
-#     class Meta:
-#         managed = False
-#         db_table = 'auth_permission'
-#
-#
-# class AuthUserGroup(models.Model):
-#     id = models.BigAutoField(primary_key=True)
-#     user_id = models.BigIntegerField()
-#     group_id = models.BigIntegerField()
-#
-#     class Meta:
-#         managed = False
-#         db_table = 'auth_user_groups'
-#
-#
-# class AuthUserPermission(models.Model):
-#     id = models.BigAutoField(primary_key=True)
-#     user_id = models.BigIntegerField()
-#     permission_id = models.BigIntegerField()
-#
-#     class Meta:
-#         managed = False
-#         db_table = 'auth_user_user_permissions'
-#
-# class DjangoContentType(models.Model):
-#     id = models.BigAutoField(primary_key=True)
-#     app_label = models.CharField(max_length=100)
-#     model = models.CharField(max_length=100)
-#
-#     class Meta:
-#         managed = False
-#         db_table = 'django_content_type'
-#
-#
-# class DjangoAdminLog(models.Model):
-#     id = models.BigAutoField(primary_key=True)
-#     action_time = models.DateTimeField()
-#     object_id = models.TextField(null=True)
-#     object_repr = models.CharField(max_length=200)
-#     action_flag = models.PositiveSmallIntegerField()
-#     change_message = models.TextField()
-#     content_type_id = models.BigIntegerField(null=True)
-#     user_id = models.BigIntegerField()
-#
-#     class Meta:
-#         managed = False
-#         db_table = 'django_admin_log'
-#
-#
-# class DjangoSession(models.Model):
-#     session_key = models.CharField(primary_key=True, max_length=40)
-#     session_data = models.TextField()
-#     expire_date = models.DateTimeField()
-#
-#     class Meta:
-#         managed = False
-#         db_table = 'django_session'
-#
-#
-#
-# class DjangoMigration(models.Model):
-#     id = models.BigAutoField(primary_key=True)
-#     app = models.CharField(max_length=255)
-#     name = models.CharField(max_length=255)
-#     applied = models.DateTimeField()
-#
-#     class Meta:
-#         managed = False
-#         db_table = 'django_migrations'
-
+logger = logging.getLogger("app")
 
 
 class Task(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    title = models.CharField(max_length=255)
-    description = models.TextField()
-    priority = models.CharField(max_length=20)
-    status = models.CharField(max_length=30)
-    created_by = models.BigIntegerField()
-    created_at = models.DateTimeField()
+
+    class Status(models.TextChoices):
+        PENDING     = "pending",     "Pending"
+        IN_PROGRESS = "in_progress", "In Progress"
+        COMPLETED   = "completed",   "Completed"
+        OVERDUE     = "overdue",     "Overdue"
+
+    class Priority(models.TextChoices):
+        LOW    = "low",    "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH   = "high",   "High"
+
+    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title       = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    status      = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    priority    = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)
+    due_date    = models.DateTimeField(null=True, blank=True)
+    assigned_to = models.ForeignKey(
+                    settings.AUTH_USER_MODEL,
+                    on_delete=models.SET_NULL,
+                    null=True, blank=True,
+                    related_name="assigned_tasks",
+                    db_index=True,
+                  )
+    created_by  = models.ForeignKey(
+                    settings.AUTH_USER_MODEL,
+                    on_delete=models.SET_NULL,
+                    null=True,
+                    related_name="created_tasks",
+                  )
+    created_at  = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at  = models.DateTimeField(auto_now=True)
 
     class Meta:
-        managed = True
-        db_table = 'tasks'
+        ordering = ["-created_at"]
+        indexes  = [
+            models.Index(fields=["status", "-created_at"],       name="task_status_time_idx"),
+            models.Index(fields=["assigned_to", "-created_at"],  name="task_user_time_idx"),
+            models.Index(fields=["due_date"],                     name="task_due_date_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.title} [{self.status}]"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SIGNALS
+# ─────────────────────────────────────────────────────────────────────────────
 
-class Notification(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    user_id = models.BigIntegerField()
-    task_id = models.BigIntegerField(null=True)
-    title = models.CharField(max_length=255)
-    message = models.TextField()
-    type = models.CharField(max_length=50)
-    is_sent = models.BooleanField()
-    scheduled_at = models.DateTimeField(null=True)
-    created_at = models.DateTimeField()
+@receiver(post_save, sender=Task)
+def task_post_save(sender, instance: Task, created: bool, **kwargs):
+    """
+    Fires after every Task.save().
+    • Logs to ActivityLog
+    • Invalidates cache keys
+    • Triggers notification if task was just assigned
+    """
+    from logs.utils import log_activity
+    from django.core.cache import cache
 
-    class Meta:
-        managed = True
-        db_table = 'notifications'
+    action = "task.created" if created else "task.updated"
+
+    log_activity(
+        user          = instance.created_by,
+        action        = action,
+        resource_type = "Task",
+        resource_id   = instance.pk,
+        metadata      = {
+            "title":       instance.title,
+            "status":      instance.status,
+            "priority":    instance.priority,
+            "assigned_to": str(instance.assigned_to_id) if instance.assigned_to_id else None,
+        },
+    )
+
+    # Phase 3 — bust cache so dashboard reflects the change immediately
+    cache.delete_many([
+        "tnb:dashboard_summary",
+        f"tnb:task_detail:{instance.pk}",
+    ])
+
+    # Phase 4 — enqueue notification on assignment
+    if created and instance.assigned_to_id:
+        from notifications.tasks import send_notification_task
+        send_notification_task.delay(
+            user_id    = instance.assigned_to.pk,
+            message    = f"You have been assigned a new task: '{instance.title}'.",
+            notif_type = "task",
+        )
+        logger.info(
+            "task_assigned_notification_queued",
+            extra={"task_id": str(instance.pk), "user_id": str(instance.assigned_to.pk)},
+        )
 
 
+@receiver(post_delete, sender=Task)
+def task_post_delete(sender, instance: Task, **kwargs):
+    from logs.utils import log_activity
+    from django.core.cache import cache
 
-class NotificationLog(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    notification_id = models.BigIntegerField()
-    channel = models.CharField(max_length=30)
-    status = models.CharField(max_length=30)
-    response = models.TextField()
-    sent_at = models.DateTimeField()
+    log_activity(
+        user          = instance.created_by,
+        action        = "task.deleted",
+        resource_type = "Task",
+        resource_id   = instance.pk,
+        metadata      = {"title": instance.title},
+    )
 
-    class Meta:
-        managed = True
-        db_table = 'notification_logs'
-
+    cache.delete_many([
+        "tnb:dashboard_summary",
+        f"tnb:task_detail:{instance.pk}",
+    ])

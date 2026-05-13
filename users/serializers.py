@@ -1,51 +1,40 @@
-from rest_framework import serializers
-from django.contrib.auth import get_user_model
-from django.contrib.auth import authenticate
-from rest_framework_simplejwt.tokens import RefreshToken
+"""
+users/serializers.py
+"""
 
-User = get_user_model()
+from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from .models import User
+
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, min_length=8)
 
     class Meta:
-        model = User
-        fields = ['email', 'full_name', 'password']
-
-    def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("Email already exists")
-        return value
+        model  = User
+        fields = ["id", "name", "email", "password", "role"]
+        extra_kwargs = {"role": {"read_only": True}}   # role set internally
 
     def create(self, validated_data):
-        # 🔐 IMPORTANT: password hash
         return User.objects.create_user(**validated_data)
 
 
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = User
+        fields = ["id", "name", "email", "role", "created_at"]
+        read_only_fields = ["id", "created_at", "role"]
 
-class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField()
 
-    def validate(self, data):
-        email = data.get("email")
-        password = data.get("password")
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """Adds user info to the login token response."""
 
-        # 🔐 Authenticate user
-        user = authenticate(username=email, password=password)
-
-        if not user:
-            raise serializers.ValidationError("Invalid credentials")
-
-        # 🎟️ Token generate
-        refresh = RefreshToken.for_user(user)
-
-        return {
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "full_name": user.full_name
-            },
-            "access": str(refresh.access_token),
-            "refresh": str(refresh)
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        data["user"] = {
+            "id":    str(self.user.pk),
+            "name":  self.user.name,
+            "email": self.user.email,
+            "role":  self.user.role,
         }
+        return data
