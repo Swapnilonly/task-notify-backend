@@ -256,6 +256,19 @@ DATABASES = {
     }
 }
 
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 8},
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
+    },
+]
+
 # ──────────────────────────────────────────────────────────────────────────────
 # PHASE 1 — STRUCTURED LOGGING
 # ──────────────────────────────────────────────────────────────────────────────
@@ -348,7 +361,7 @@ LOGGING = {
             "propagate": False,
         },
         "django.request": {
-            "handlers": ["error_file"],
+            "handlers": ["error_file", "console"],
             "level": "ERROR",
             "propagate": False,
         },

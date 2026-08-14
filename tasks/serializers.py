@@ -4,12 +4,12 @@ tasks/serializers.py
 
 from rest_framework import serializers
 from .models import Task
-from users.serializers import UserSerializer
+from users.serializers import UserProfileSerializer
 
 
 class TaskSerializer(serializers.ModelSerializer):
-    assigned_to_detail = UserSerializer(source="assigned_to", read_only=True)
-    created_by_detail  = UserSerializer(source="created_by",  read_only=True)
+    assigned_to_detail = UserProfileSerializer(source="assigned_to", read_only=True)
+    created_by_detail  = UserProfileSerializer(source="created_by",  read_only=True)
 
     class Meta:
         model  = Task
