@@ -8,6 +8,7 @@ Start workers:
   celery -A config worker -l info -c 4
   celery -A config beat   -l info
   celery -A config flower                    (monitoring UI)
+  celery -A config worker -l info -P solo
 """
 
 import os
@@ -22,6 +23,7 @@ app = Celery("task_notify")
 
 # Pull all CELERY_* keys from Django settings
 app.config_from_object("django.conf:settings", namespace="CELERY")
+app.conf.worker_hijack_root_logger = False
 
 # Auto-discover tasks.py in every installed app
 app.autodiscover_tasks()

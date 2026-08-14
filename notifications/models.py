@@ -25,6 +25,7 @@ class Notification(models.Model):
                     related_name="notifications",
                     db_index=True,
                  )
+    title = models.CharField(max_length=255, blank=True, default="")
     message    = models.TextField()
     type       = models.CharField(max_length=20, choices=Type.choices, default=Type.TASK)
     is_read    = models.BooleanField(default=False, db_index=True)

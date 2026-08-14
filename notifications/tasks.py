@@ -19,6 +19,7 @@ from datetime import timedelta
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.utils import timezone
+from .models import Notification
 
 celery_logger = logging.getLogger("celery")
 
@@ -203,6 +204,33 @@ def cleanup_old_notifications_task(days: int = 30):
         celery_logger.error("cleanup_old_notifications failed", extra={"error": str(exc)}, exc_info=True)
         raise
 
+@shared_task
+def send_welcome_notification(user_id):
+    """
+    :param user_id:
+    :return:
+    """
+    print("USER ID in function argument:", user_id)
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    try:
+        user = User.objects.get(id=user_id)
+        print("USER Id to send notification :", user.id)
+        Notification.objects.create(
+            user_id=user.id,
+            title="Welcome to Task Notify!",
+            message=f"Hi {user.name}, your account is ready. Start managing your tasks.",
+            type=Notification.Type.SYSTEM,
+        )
+        print("NOTIFICATION CREATED")
+        # celery_logger.info(f"Welcome notification sent to user_id={user_id}")
+    except Exception as e:
+        print("TASK ERROR:", repr(e))
+        raise
+        # celery_logger.error(f"Welcome notification failed for user_id={user_id}: {e}")
+
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal helper — does NOT raise; email failure must not crash the task
@@ -224,3 +252,10 @@ def _send_email_notification(user, message: str) -> None:
         )
     except Exception as exc:
         celery_logger.warning("email_send_failed", extra={"user": str(user.pk), "error": str(exc)})
+
+# debug_tasks.py
+
+
+@shared_task
+def hello():
+    print("HELLO FROM CELERY")
