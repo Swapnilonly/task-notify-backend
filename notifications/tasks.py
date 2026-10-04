@@ -15,11 +15,24 @@ All failures are logged to celery.log AND to ActivityLog via on_task_failure sig
 
 import logging
 from datetime import timedelta
-
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.utils import timezone
-from .models import Notification
+from notifications.services import (
+    resolve_recipient_ids,
+    get_enabled_channels,
+    build_notifications,
+)
+from django.db import transaction
+from tasks.models import Task
+from logs.utils import log_activity
+from notifications.models import Notification
+from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
+from django.conf import settings
+from .providers import send_via_provider
+from .models import NotificationDelivery, TaskEvent
+
 
 celery_logger = logging.getLogger("celery")
 
@@ -31,31 +44,39 @@ celery_logger = logging.getLogger("celery")
     bind=True,
     max_retries=3,
     default_retry_delay=60,    # first retry after 60 s
-    name="notifications.send_notification",
-)
-def send_notification_task(self, user_id: int, message: str, notif_type: str = "task"):
-    """
-    Creates a Notification record for user_id and optionally sends an email.
-    Called from task signals (task assigned, task completed, etc.)
+    name="notifications.send_notification")
+def send_notification_task(self, user_id: int, message: str, title: str,  notif_type: str = "task", task_id = None):
 
-    Args:
-        user_id   — pk of the receiving User
-        message   — notification text
-        notif_type — "task" | "reminder" | "system"
     """
+        Creates a Notification record for user_id and optionally sends an email.
+        Called from task signals (task assigned, task completed, etc.)
+
+        Args:
+            user_id   — pk of the receiving User
+            message   — notification text
+            notif_type — "task" | "reminder" | "system"
+        """
     try:
-        from django.contrib.auth import get_user_model
-        from notifications.models import Notification
-        from logs.utils import log_activity
 
         User = get_user_model()
         user = User.objects.get(pk=user_id)
+        event_id = f"{notif_type}:{task_id}"
 
-        notif = Notification.objects.create(
-            user    = user,
-            message = message,
-            type    = notif_type,
-        )
+        event, created = Notification.objects.get_or_create(
+            event_id=event_id,
+            defaults={
+                "id": task_id,
+                "user_id": user_id,
+                "event_type": notif_type,
+                "title" : title,
+            })
+
+        if not created:
+            celery_logger.info(
+                "notification_already_processed",
+                extra={"event_id": event_id},
+            )
+            return
 
         # Optionally send email
         _send_email_notification(user, message)
@@ -64,7 +85,7 @@ def send_notification_task(self, user_id: int, message: str, notif_type: str = "
             user          = user,
             action        = "notification.sent",
             resource_type = "Notification",
-            resource_id   = notif.pk,
+            resource_id   = event.pk,
             metadata      = {"type": notif_type, "message": message[:100]},
         )
 
@@ -72,7 +93,7 @@ def send_notification_task(self, user_id: int, message: str, notif_type: str = "
             "notification_sent",
             extra={"user_id": user_id, "type": notif_type},
         )
-        return {"status": "sent", "notification_id": str(notif.pk)}
+        return {"status": "sent", "notification_id": str(event.pk)}
 
     except SoftTimeLimitExceeded:
         celery_logger.error("send_notification_task hit soft time limit", extra={"user_id": user_id})
@@ -104,7 +125,6 @@ def deadline_reminder_task():
     Schedule: set up in Django admin → Periodic Tasks → every 1 hour.
     """
     try:
-        from tasks.models import Task
 
         now       = timezone.now()
         in_24h    = now + timedelta(hours=24)
@@ -144,8 +164,6 @@ def mark_overdue_tasks_task():
     pending or in_progress, marks them overdue, notifies assignees.
     """
     try:
-        from tasks.models import Task
-        from logs.utils import log_activity
 
         overdue = Task.objects.filter(
             due_date__lt=timezone.now(),
@@ -190,7 +208,6 @@ def cleanup_old_notifications_task(days: int = 30):
     Deletes read notifications older than `days` days to keep the table lean.
     """
     try:
-        from notifications.models import Notification
 
         cutoff   = timezone.now() - timedelta(days=days)
         deleted, _ = Notification.objects.filter(
@@ -210,24 +227,19 @@ def send_welcome_notification(user_id):
     :param user_id:
     :return:
     """
-    print("USER ID in function argument:", user_id)
-    from django.contrib.auth import get_user_model
     User = get_user_model()
     try:
         user = User.objects.get(id=user_id)
-        print("USER Id to send notification :", user.id)
         Notification.objects.create(
             user_id=user.id,
             title="Welcome to Task Notify!",
             message=f"Hi {user.name}, your account is ready. Start managing your tasks.",
             type=Notification.Type.SYSTEM,
         )
-        print("NOTIFICATION CREATED")
-        # celery_logger.info(f"Welcome notification sent to user_id={user_id}")
+        celery_logger.info(f"Welcome notification sent to user_id={user_id}")
     except Exception as e:
-        print("TASK ERROR:", repr(e))
         raise
-        # celery_logger.error(f"Welcome notification failed for user_id={user_id}: {e}")
+        celery_logger.error(f"Welcome notification failed for user_id={user_id}: {e}")
 
 
 
@@ -237,8 +249,6 @@ def send_welcome_notification(user_id):
 # ─────────────────────────────────────────────────────────────────────────────
 def _send_email_notification(user, message: str) -> None:
     try:
-        from django.core.mail import send_mail
-        from django.conf import settings
 
         if not user.email:
             return
@@ -253,9 +263,71 @@ def _send_email_notification(user, message: str) -> None:
     except Exception as exc:
         celery_logger.warning("email_send_failed", extra={"user": str(user.pk), "error": str(exc)})
 
-# debug_tasks.py
 
+@shared_task(bind=True, max_retries=3)
+def deliver_notification(self, notif_id):
+
+    with transaction.atomic():
+        notif = Notification.objects.select_for_update().get(id=notif_id)
+        if notif.status == 'SENT':
+            return  # Layer 2: already sent, kuch mat karo
+        notif.status = 'SENT'
+        notif.save()
+
+    transaction.on_commit(lambda: _actually_send(notif, self.request.retries))
+
+
+def _actually_send(notif, attempt_number):
+    try:
+        send_via_provider(notif, idempotency_key=f"notif-{notif.id}")  # Layer 3: provider-level
+        NotificationDelivery.objects.create(
+            notification=notif, attempt_number=attempt_number + 1, status='SENT'
+        )
+    except Exception as e:
+        NotificationDelivery.objects.create(
+            notification=notif, attempt_number=attempt_number + 1,
+            status='FAILED', error_message=str(e)
+        )
+        notif.status = 'FAILED'
+        notif.save()
+        raise  # Celery ko batao taaki retry ho
+
+def dispatch_after_commit(event):
+    notif_ids = list(
+        Notification.objects.filter(task_event=event).values_list('id', flat=True)
+    )
+    for id in notif_ids:
+        transaction.on_commit(lambda id=id: deliver_notification.delay(id))
 
 @shared_task
-def hello():
-    print("HELLO FROM CELERY")
+def process_task_event(task_id, event_type):
+    try:
+        task = Task.objects.select_related('assigned_to', 'created_by').get(id=task_id)
+
+    except Task.DoesNotExist:
+        celery_logger.error(
+            "process_task_event: task not found",
+            extra={"task_id": task_id, "event_type": event_type},
+        )
+        raise
+
+    try:
+        event = TaskEvent.objects.create(task=task, event_type=event_type, actor=task.created_by)
+        recipient_ids = resolve_recipient_ids(task)
+        prefs = get_enabled_channels(recipient_ids, event_type)
+        to_create = build_notifications(task, event, prefs)
+        Notification.objects.bulk_create(to_create, ignore_conflicts=True)
+        dispatch_after_commit(event)
+
+    except Exception as exc:
+        celery_logger.error(
+            "process_task_event failed",
+            extra={"task_id": task_id, "event_type": event_type, "error": str(exc)},
+            exc_info=True,
+        )
+        raise
+        # self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+
+
+
+

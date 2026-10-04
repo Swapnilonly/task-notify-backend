@@ -313,14 +313,23 @@ LOGGING = {
             "level": "ERROR",
         },
         # Audit trail — daily rotation, kept 90 days
+        # "audit_file": {
+        #     "class": "logging.handlers.TimedRotatingFileHandler",
+        #     "filename": str(LOGS_DIR / "audit.log"),
+        #     "when": "midnight",
+        #     "interval": 1,
+        #     "backupCount": 90,
+        #     "formatter": "json",
+        # },
+
+        #ADD FOR SIMPEL DEBUGGING
         "audit_file": {
-            "class": "logging.handlers.TimedRotatingFileHandler",
+            "class": "logging.FileHandler",
             "filename": str(LOGS_DIR / "audit.log"),
-            "when": "midnight",
-            "interval": 1,
-            "backupCount": 90,
             "formatter": "json",
+            "level": "INFO",
         },
+
         # Celery worker logs
         "celery_file": {
             "class": "logging.handlers.RotatingFileHandler",
@@ -344,8 +353,17 @@ LOGGING = {
             "propagate": False,
         },
         # Audit logger     → audit_logger = logging.getLogger("audit")
+
+        # "audit": {
+        #     "handlers": ["audit_file", "console"],
+        #     "level": "INFO",
+        #     "propagate": False,
+        # },
+
+
+        # ADD FOR SIMPLE LOGGING
         "audit": {
-            "handlers": ["audit_file", "console"],
+            "handlers": ["audit_file"],
             "level": "INFO",
             "propagate": False,
         },
@@ -383,6 +401,7 @@ CELERY_TASK_TRACK_STARTED   = True
 CELERY_TASK_TIME_LIMIT      = 30 * 60
 CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60
 CELERY_BEAT_SCHEDULER       = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PHASE 3 — REDIS CACHE

@@ -1,0 +1,1 @@
+DEFAULT_CHANNEL_ENABLED = {"IN_APP": True, "EMAIL": False}

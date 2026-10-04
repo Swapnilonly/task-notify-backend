@@ -53,9 +53,8 @@ class RegisterView(APIView):
 
                 invalidate_user_permission_cache(user.id)
                 refresh = RefreshToken.for_user(user)
-                logger.info(f"New user registered: {user.email} | role: member")
-
-            send_welcome_notification(user.id)
+                logger.info(f"New user registered: {user.email} | role: {DEFAULT_ROLE}")
+            transaction.on_commit(lambda: send_welcome_notification(user.id))
 
             return Response({
                     "message" : "Registration successful.",
@@ -238,7 +237,9 @@ class AssignRoleView(APIView):
                 role        = new_role,
                 assigned_by = request.user
             )
-            invalidate_user_permission_cache(target_user.id)
+        transaction.on_commit(
+            lambda: invalidate_user_permission_cache(target_user.id)
+        )
 
         logger.info(
             f"Role changed --> user: {target_user.email} | "

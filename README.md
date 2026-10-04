@@ -6,15 +6,15 @@ Production-ready Django REST API for task management, notifications, and audit l
 
 ## Tech Stack
 
-| Layer          | Technology                          |
-|----------------|-------------------------------------|
-| Framework      | Django 4.2 + DRF                    |
-| Auth           | JWT (SimpleJWT) + Token Blacklist   |
-| Database       | PostgreSQL 15                       |
-| Cache          | Redis 7 (django-redis)              |
-| Background     | Celery 5 + Celery Beat              |
-| Containerise   | Docker + Docker Compose             |
-| Testing        | Pytest + pytest-django + coverage   |
+| Layer          | Technology                        |
+|----------------|-----------------------------------|
+| Framework      | Django 4.2 + DRF                  |
+| Auth           | JWT (SimpleJWT) + Token Blacklist |
+| Database       | MYSQL                             |
+| Cache          | Redis 7 (django-redis)            |
+| Background     | Celery 5 + Celery Beat            |
+| Containerise   | Docker + Docker Compose           |
+| Testing        | Pytest + pytest-django + coverage |
 
 ---
 

@@ -6,8 +6,8 @@ from django.core.cache import cache
 from rest_framework.permissions import BasePermission
 
 from .models import Permission, UserRole
+from .constant import PERMISSION_CACHE_TTL
 
-PERMISSION_CACHE_TTL = 300  # 5 minutes
 
 
 # ─────────────────────────────────────────────

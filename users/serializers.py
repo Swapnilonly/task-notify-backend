@@ -52,8 +52,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             "id"          : str(user.pk),
             "name"        : user.name,
             "email"       : user.email,
-            "roles"       : roles,              # ← list, not single string
-            "permissions" : perms,              # ← flat permission list
+            "roles"       : roles,
+            "permissions" : perms,
         }
         return data
 

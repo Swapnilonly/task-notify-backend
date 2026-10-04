@@ -9,6 +9,7 @@ Start workers:
   celery -A config beat   -l info
   celery -A config flower                    (monitoring UI)
   celery -A config worker -l info -P solo
+  celery -A config worker --loglevel=info -P solo
 """
 
 import os

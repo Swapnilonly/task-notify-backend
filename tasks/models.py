@@ -37,6 +37,7 @@ class Task(models.Model):
     status      = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
     priority    = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)
     due_date    = models.DateTimeField(null=True, blank=True)
+    idempotency_key = models.CharField(max_length=255, unique=True, null=True, blank=True, db_index=True)
     assigned_to = models.ForeignKey(
                     settings.AUTH_USER_MODEL,
                     on_delete=models.SET_NULL,
@@ -65,6 +66,14 @@ class Task(models.Model):
         return f"{self.title} [{self.status}]"
 
 
+class TaskWatcher(models.Model):
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='watchers')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+
+    class Meta:
+        unique_together = ('task', 'user')   # ek user ek task ko do baar watch na kare
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SIGNALS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,7 +84,6 @@ def task_post_save(sender, instance: Task, created: bool, **kwargs):
     Fires after every Task.save().
     • Logs to ActivityLog
     • Invalidates cache keys
-    • Triggers notification if task was just assigned
     """
     from logs.utils import log_activity
     from django.core.cache import cache
@@ -102,17 +110,17 @@ def task_post_save(sender, instance: Task, created: bool, **kwargs):
     ])
 
     # Phase 4 — enqueue notification on assignment
-    if created and instance.assigned_to_id:
-        from notifications.tasks import send_notification_task
-        send_notification_task.delay(
-            user_id    = instance.assigned_to.pk,
-            message    = f"You have been assigned a new task: '{instance.title}'.",
-            notif_type = "task",
-        )
-        logger.info(
-            "task_assigned_notification_queued",
-            extra={"task_id": str(instance.pk), "user_id": str(instance.assigned_to.pk)},
-        )
+    # if created and instance.assigned_to_id:
+    #
+    #     send_notification_task.delay(
+    #         user_id    = instance.assigned_to.pk,
+    #         message    = f"You have been assigned a new task: '{instance.title}'.",
+    #         notif_type = "task",
+    #     )
+    #     logger.info(
+    #         "task_assigned_notification_queued",
+    #         extra={"task_id": str(instance.pk), "user_id": str(instance.assigned_to.pk)},
+    #     )
 
 
 @receiver(post_delete, sender=Task)
@@ -127,7 +135,7 @@ def task_post_delete(sender, instance: Task, **kwargs):
         resource_id   = instance.pk,
         metadata      = {"title": instance.title},
     )
-
+    #TO-D0
     cache.delete_many([
         "tnb:dashboard_summary",
         f"tnb:task_detail:{instance.pk}",
