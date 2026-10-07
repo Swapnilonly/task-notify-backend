@@ -6,7 +6,7 @@ __pycache__/
 
 *.pyc
 .env
-.logs_dir
+logs_dir/
 db.sqlite3
 .idea/
 
