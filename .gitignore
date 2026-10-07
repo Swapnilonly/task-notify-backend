@@ -3,13 +3,10 @@ venv/
 
 # Python cache
 __pycache__/
+
 *.pyc
-
-# Environment variables
 .env
-
-# Django
+.logs_dir
 db.sqlite3
-
-# IDE
 .idea/
+

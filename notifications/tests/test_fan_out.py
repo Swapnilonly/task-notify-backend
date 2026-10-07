@@ -25,7 +25,7 @@ class FanOutTest(BaseSetup):
         self.assertEqual(TaskEvent.objects.filter(task=self.task).count(), 1)
         event = TaskEvent.objects.first()
         self.assertEqual(event.event_type, 'CREATED')
-        self.assertEqual(event.actor_id, self.assignee.id)
+        self.assertEqual(event.actor_id, self.creator.id)
 
     def test_disabled_preference_is_excluded(self):
         # watcher apna preference off kar deta hai
@@ -44,6 +44,7 @@ class FanOutTest(BaseSetup):
     def test_no_preference_means_no_notification(self):
         # naya user jiska koi preference row hi nahi hai
         new_watcher = User.objects.create(email='new@example.com')
+        NotificationPreference.objects.filter(user=new_watcher).delete()
         TaskWatcher.objects.create(task=self.task, user=new_watcher)
 
         process_task_event(str(self.task.id), 'CREATED')

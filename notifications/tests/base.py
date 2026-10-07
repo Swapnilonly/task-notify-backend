@@ -29,7 +29,13 @@ class BaseSetup(TestCase):
         TaskWatcher.objects.create(task_id=self.task.id, user_id=self.watcher.id)
 
         # teeno recipients (assignee, creator, watcher) ke liye preference enable karo
+        # for user in [self.assignee, self.creator, self.watcher]:
+        #     NotificationPreference.objects.create(
+        #         user=user, event_type='CREATED', channel='IN_APP', enabled=True
+        #     )
+
         for user in [self.assignee, self.creator, self.watcher]:
-            NotificationPreference.objects.create(
-                user=user, event_type='CREATED', channel='IN_APP', enabled=True
+            NotificationPreference.objects.update_or_create(
+                user=user, event_type='CREATED', channel='IN_APP',
+                defaults={'enabled': True},
             )
