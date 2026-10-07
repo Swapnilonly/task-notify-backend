@@ -109,18 +109,6 @@ def task_post_save(sender, instance: Task, created: bool, **kwargs):
         f"tnb:task_detail:{instance.pk}",
     ])
 
-    # Phase 4 — enqueue notification on assignment
-    # if created and instance.assigned_to_id:
-    #
-    #     send_notification_task.delay(
-    #         user_id    = instance.assigned_to.pk,
-    #         message    = f"You have been assigned a new task: '{instance.title}'.",
-    #         notif_type = "task",
-    #     )
-    #     logger.info(
-    #         "task_assigned_notification_queued",
-    #         extra={"task_id": str(instance.pk), "user_id": str(instance.assigned_to.pk)},
-    #     )
 
 
 @receiver(post_delete, sender=Task)

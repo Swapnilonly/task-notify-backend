@@ -8,13 +8,10 @@ class RequestLoggerMiddleware:
     def __call__(self, request):
         start_time = time.time()
 
-        print(f"Request Method: {request.method}")
-        print(f"Request Path: {request.path}")
 
         response = self.get_response(request)
 
         duration = time.time() - start_time
-        print(f"Response Time: {duration:.4f} sec")
 
         return response
 

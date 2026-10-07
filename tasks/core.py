@@ -57,25 +57,6 @@ def list_tasks(request, view):
     return paginator.get_paginated_response(serializer.data)
 
 
-# def create_task(request):
-#     """
-#     Returns (response_data, http_status).
-#     Raises nothing to the view — all exceptions handled here.
-#     """
-#     serializer = TaskSerializer(data=request.data, context={"request": request})
-#     if not serializer.is_valid():
-#         return {"errors": serializer.errors}, 400
-#
-#     try:
-#         with transaction.atomic():
-#             task = serializer.save(created_by=request.user)
-#             logger.info(f"Task created: {task.id} by {request.user.email}")
-#         return {"status": True, "message": "Task created successfully.", "data": serializer.data}, 201
-#
-#     except Exception as e:
-#         logger.error(f"Task creation failed: {e}")
-#         return {"status": False, "error": "Task creation failed. Please try again."}, 500
-
 
 def create_task(request) -> tuple[dict, int]:
     """
