@@ -95,6 +95,12 @@ class UserManager(BaseUserManager):
 # ─────────────────────────────────────────────
 # Custom User Model
 # ─────────────────────────────────────────────
+class Team(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    manager = models.ForeignKey(
+        "users.User", on_delete=models.PROTECT, related_name="managed_teams"
+    )
+
 
 class User(AbstractBaseUser, PermissionsMixin):
     """
@@ -108,6 +114,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff   = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    team =       models.ForeignKey(Team, null=True, blank=True, on_delete=models.SET_NULL, related_name="members")
 
     USERNAME_FIELD  = "email"
     REQUIRED_FIELDS = ["name"]

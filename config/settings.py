@@ -294,6 +294,7 @@ REST_FRAMEWORK = {
         "user":  "1000/hour",
         "report": "20/hour",
         "auth":   "10/minute",
+        "register": "10/hour"
     },
     "EXCEPTION_HANDLER": "utils.exception_handler.custom_exception_handler",
 }

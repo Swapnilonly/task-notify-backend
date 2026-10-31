@@ -4,7 +4,7 @@ users/serializers.py
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from .models import Role, UserRole
-from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.password_validation import validate_password as run_password_validators
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 User = get_user_model()
@@ -18,18 +18,20 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ['email', 'name', 'password', 'confirm_password']
 
     def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
+        normalized_email = value.lower().strip()
+        if User.objects.filter(email__iexact=normalized_email).exists():
             raise serializers.ValidationError("Email already registered.")
-        return value.lower().strip()
+        return normalized_email
 
     def validate_password(self, value):
-        validate_password(value)
+        run_password_validators(value)
         return value
 
-    def validate(self, data):
-        if data['password'] != data['confirm_password']:
+    def validate(self, attrs):
+        confirm_password = attrs.pop("confirm_password")
+        if attrs["password"] != confirm_password:
             raise serializers.ValidationError("Passwords do not match.")
-        return data
+        return attrs
 
     def create(self, validated_data):
         validated_data.pop('confirm_password')
