@@ -12,14 +12,14 @@ from users.models import Role, Permission
 
 ROLES_PERMISSIONS = {
     "admin": [
-        "task:create", "task:read", "task:update", "task:delete", "task:assign",
+        "task:create", "task:read", "task:update", "task:delete", "task:assign", "task:read_all",
         "user:manage", "user:read",
         "report:view", "report:export",
         "notification:manage",
         "audit:view",
     ],
     "manager": [
-        "task:create", "task:read", "task:update", "task:assign",
+        "task:create", "task:read", "task:update", "task:assign", "task:read_team",
         "user:read",
         "report:view",
         "notification:manage",

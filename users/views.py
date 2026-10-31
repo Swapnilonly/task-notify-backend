@@ -3,7 +3,7 @@ users/views.py — All auth + RBAC endpoints using APIView.
 """
 
 import logging
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.contrib.auth import get_user_model
 
 from rest_framework.views import APIView
@@ -19,6 +19,8 @@ from .models import Role, UserRole
 from .serializers import (RegisterSerializer, UserProfileSerializer, RoleSerializer, AssignRoleSerializer)
 from .permissions import (HasPerm, IsAdminRole, invalidate_user_permission_cache, get_user_permissions, user_has_role_id)
 from .constant import DEFAULT_ROLE
+from .throttles import RegisterRateThrottle
+from .services import auth_service
 User   = get_user_model()
 logger = logging.getLogger("app")
 
@@ -27,63 +29,116 @@ logger = logging.getLogger("app")
 # Auth Endpoints
 # ─────────────────────────────────────────────
 
+# class RegisterView(APIView):
+#     """
+#     POST /api/auth/register/
+#     Public endpoint. Creates user, assigns default 'member' role,
+#     fires welcome notification via Celery, returns JWT tokens.
+#     """
+#     permission_classes = []
+#
+#     def post(self, request):
+#         serializer = RegisterSerializer(data=request.data)
+#         if not serializer.is_valid():
+#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+#
+#         try:
+#             with transaction.atomic():
+#
+#                 user = serializer.save()
+#                 default_role = Role.objects.get(name=DEFAULT_ROLE)
+#                 UserRole.objects.create(
+#                     user        = user,
+#                     role        = default_role,
+#                     assigned_by = None
+#                 )
+#
+#                 invalidate_user_permission_cache(user.id)
+#                 refresh = RefreshToken.for_user(user)
+#                 logger.info(f"New user registered: {user.email} | role: {DEFAULT_ROLE}")
+#                 transaction.on_commit(lambda: send_welcome_notification(user.id), robust=True)
+#
+#             return Response({
+#                     "message" : "Registration successful.",
+#                     "user"    : {
+#                         "id"    : str(user.id),
+#                         "name"  : user.name,
+#                         "email" : user.email,
+#                         "role"  : default_role.name,
+#                         "role_id": default_role.id,
+#                     },
+#                     "tokens"  : {
+#                         "access"  : str(refresh.access_token),
+#                         "refresh" : str(refresh),
+#                     }
+#                 }, status=status.HTTP_201_CREATED)
+#
+#         except Role.DoesNotExist:
+#             logger.error(f"Default role '{DEFAULT_ROLE}' missing. Run: python manage.py seed_roles")
+#             return Response(
+#                 {"error": "System configuration error. Contact support."},
+#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+#             )
+#         except Exception as e:
+#             logger.error(f"Registration failed: {e}")
+#             return Response(
+#                 {"error": "Registration failed. Please try again."},
+#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+#             )
+
+
+def build_register_response(user, role):
+    """Assemble the 201 payload including fresh JWT tokens."""
+    refresh = RefreshToken.for_user(user)
+    return {
+        "message": "Registration successful.",
+        "user": {
+            "id": str(user.id),
+            "name": user.name,
+            "email": user.email,
+            "role": role.name,
+            "role_id": role.id,
+        },
+        "tokens": {
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+        },
+    }
+
+
+
 class RegisterView(APIView):
-    """
-    POST /api/auth/register/
-    Public endpoint. Creates user, assigns default 'member' role,
-    fires welcome notification via Celery, returns JWT tokens.
-    """
-    permission_classes = []
+    throttle_classes = [RegisterRateThrottle]
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+        serializer.is_valid(raise_exception=True)
         try:
-            with transaction.atomic():
-
-                user = serializer.save()
-                default_role = Role.objects.get(name=DEFAULT_ROLE)
-                UserRole.objects.create(
-                    user        = user,
-                    role        = default_role,
-                    assigned_by = None
-                )
-
-                invalidate_user_permission_cache(user.id)
-                refresh = RefreshToken.for_user(user)
-                logger.info(f"New user registered: {user.email} | role: {DEFAULT_ROLE}")
-            transaction.on_commit(lambda: send_welcome_notification(user.id))
-
-            return Response({
-                    "message" : "Registration successful.",
-                    "user"    : {
-                        "id"    : str(user.id),
-                        "name"  : user.name,
-                        "email" : user.email,
-                        "role"  : default_role.name,
-                        "role_id": default_role.id,
-                    },
-                    "tokens"  : {
-                        "access"  : str(refresh.access_token),
-                        "refresh" : str(refresh),
-                    }
-                }, status=status.HTTP_201_CREATED)
-
+            user, role = auth_service.register_user(**serializer.validated_data)
         except Role.DoesNotExist:
-            logger.error("Default role 'member' missing. Run: python manage.py seed_roles")
-            return Response(
-                {"error": "System configuration error. Contact support."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            logger.exception(
+                "Default role '%s' missing. Run: python manage.py seed_roles",
+                DEFAULT_ROLE,
             )
-        except Exception as e:
-            logger.error(f"Registration failed: {e}")
+            return self._error("System configuration error. Contact support.")
+        except IntegrityError:
+            # A concurrent signup with the same email slipped past validate_email.
             return Response(
-                {"error": "Registration failed. Please try again."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"email": ["Email already registered."]},
+                status=status.HTTP_400_BAD_REQUEST,
             )
+        except Exception:
+            logger.exception("Registration failed")
+            return self._error("Registration failed. Please try again.")
+        return Response(
+            build_register_response(user, role), status=status.HTTP_201_CREATED
+        )
 
+    @staticmethod
+    def _error(message: str) -> Response:
+        return Response(
+            {"error": message}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 class LogoutView(APIView):
     """

@@ -10,6 +10,7 @@ import logging
 from django.core.cache import cache
 from django.conf import settings
 from django.db import transaction, IntegrityError
+from django.db.models import Q, QuerySet
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
 from rest_framework.pagination import PageNumberPagination
@@ -17,6 +18,9 @@ from notifications.tasks import process_task_event
 from .models import Task
 from .serializers import TaskSerializer
 from logs.utils import log_activity
+from .constants import READ, READ_ALL, READ_TEAM
+from users.permissions import user_has_permission
+from users.models import User
 
 logger = logging.getLogger("app")
 CACHE_TTL = settings.CACHE_TTL
@@ -33,12 +37,26 @@ class TaskPagination(PageNumberPagination):
 FILTER_BACKENDS = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
 
 
+def _personal_scope(user):
+    return Q(created_by=user) | Q(assigned_to=user) | Q(watchers__user=user)
+
+def _team_scope(user):
+    team_member_ids = User.objects.filter(team__manager=user).values("id")
+    return Q(created_by__in=team_member_ids) | Q(assigned_to__in=team_member_ids)
+
+
 def get_task_queryset(user):
-    """Base queryset scoped by permission: admins see all, others see own."""
-    qs = Task.objects.select_related("assigned_to", "created_by")
-    if not user.is_admin:
-        qs = qs.filter(assigned_to=user) | qs.filter(created_by=user)
-    return qs.distinct()
+    """Return tasks visible to the user; the broadest scope permission wins."""
+    # Checked here too so callers outside the HTTP views can't bypass it.
+    if not user_has_permission(user, READ):
+        return Task.objects.none()
+
+    tasks = Task.objects.select_related("assigned_to", "created_by")
+    if user_has_permission(user, READ_ALL):
+        return tasks
+    if user_has_permission(user, READ_TEAM):
+        return tasks.filter(_team_scope(user) | _personal_scope(user)).distinct()
+    return tasks.filter(_personal_scope(user)).distinct()
 
 
 def list_tasks(request, view):
